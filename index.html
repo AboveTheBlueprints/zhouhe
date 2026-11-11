@@ -24,7 +24,7 @@ canvas { background:#2b2622; cursor:pointer; }
 /* 粥河 第四版（第四个 第 17 天 13:40）：粥面不平、奶只三回、平地上奶会流开；勺子挨着奶舀，带一口奶也正好；泡开了的自己接着软。
    第二版（第四个 第 17 天 13:04）：一勺一勺地过。Kezia 在粥中间挖一条河，灌满奶，一口一口吃河岸。
    干的噎，泡透的糊，奶刚洇到的那一圈正好。 */
-const CFG = Object.assign({ POURS: 3, POUR: 2.5, STICK: 0.02, SELF: 0.01, ABS: 0.2, SCOOP: 0.25, LUMPY: 1 }, (typeof window !== 'undefined' && window.__cfg) || {});
+const CFG = Object.assign({ POURS: 3, POUR: 2.5, STICK: 0.02, SELF: 0.014, ABS: 0.2, SCOOP: 0.25, LUMPY: 1 }, (typeof window !== 'undefined' && window.__cfg) || {});
 const N = 20, CS = 22, OX = 40, OY = 40, R = 9.3, CX = 9.5, CY = 9.5, SPOONS = 30, POURS = CFG.POURS, TICKS = 6;
 let pourMarks = []; let P, M, S, IN, used, good, dry, mushy, tool, over, pours, pending, slumpNote, marks, slumps;
 const cv = document.getElementById('c'), g = cv.getContext('2d');
@@ -151,11 +151,11 @@ function draw() {
       r = Math.min(255, r * k); gg = Math.min(255, gg * k); b = Math.min(255, b * k);
     } else { r = 246; gg = 248; b = 252; } /* 碗底，白瓷 */
     g.fillStyle = `rgb(${r|0},${gg|0},${b|0})`; g.fillRect(OX + x * CS, OY + y * CS, CS, CS);
-    if (p > 0 && s >= 0.7) { /* 糊了：灰底上两道平行斜线，不跟深橙混，也不跟塌过的×混 */
-      g.strokeStyle = 'rgba(70,70,74,0.7)'; g.lineWidth = 1.5; g.beginPath();
+    if (M[i] > 0.03) { g.fillStyle = `rgba(252,253,255,${Math.min(0.95, 0.55 + M[i] * 0.4)})`; g.fillRect(OX + x * CS + 2, OY + y * CS + 2, CS - 4, CS - 4); }
+    if (p > 0 && s >= 0.7) { /* 糊了：两道平行斜线，画在奶上面（第七版：原来画在奶底下，泡在奶里的糊格看着是白的，两个生人吃了才知道） */
+      g.strokeStyle = 'rgba(70,70,74,0.8)'; g.lineWidth = 1.5; g.beginPath();
       g.moveTo(OX + x * CS + 3, OY + (y + 1) * CS - 9); g.lineTo(OX + x * CS + 9, OY + y * CS + 3);
       g.moveTo(OX + x * CS + 9, OY + (y + 1) * CS - 3); g.lineTo(OX + (x + 1) * CS - 3, OY + y * CS + 9); g.stroke(); g.lineWidth = 1; }
-    if (M[i] > 0.03) { g.fillStyle = `rgba(252,253,255,${Math.min(0.95, 0.55 + M[i] * 0.4)})`; g.fillRect(OX + x * CS + 2, OY + y * CS + 2, CS - 4, CS - 4); }
   }
   /* 高低：哪两格之间差一层，就在那条边上画一道影子（低的那边） */
   g.strokeStyle = 'rgba(70,50,30,0.55)'; g.lineWidth = 2;
