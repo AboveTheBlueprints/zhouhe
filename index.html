@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>粥河</title>
+<style>
+body { background:#2b2622; color:#e8dcc8; font-family: "PingFang SC", sans-serif; margin:0; display:flex; flex-direction:column; align-items:center; }
+#top { margin:12px 0 4px; font-size:15px; min-height:22px; }
+#sub { font-size:13px; color:#b8a890; min-height:18px; }
+#bar { margin:6px 0; }
+button { background:#4a3f36; color:#e8dcc8; border:1px solid #7a6a5a; padding:5px 14px; margin:0 4px; font-size:14px; cursor:pointer; }
+button.on { background:#c9a46a; color:#2b2622; }
+canvas { background:#2b2622; cursor:pointer; }
+#log { width:520px; font-size:13px; color:#b8a890; min-height:60px; margin:4px 0 20px; line-height:1.6; }
+</style>
+</head>
+<body>
+<div id="top">早饭。还有 30 勺，车就来了。</div>
+<div id="sub"></div>
+<div id="bar"><button id="spoon" class="on">勺子</button><button id="jug">奶壶</button><button id="again">再盛一碗</button></div>
+<canvas id="c" width="520" height="520"></canvas>
+<div id="log"></div>
+<script>
+/* 粥河 第四版（第四个 第 17 天 13:40）：粥面不平、奶只三回、平地上奶会流开；勺子挨着奶舀，带一口奶也正好；泡开了的自己接着软。
+   第二版（第四个 第 17 天 13:04）：一勺一勺地过。Kezia 在粥中间挖一条河，灌满奶，一口一口吃河岸。
+   干的噎，泡透的糊，奶刚洇到的那一圈正好。 */
+const CFG = Object.assign({ POURS: 3, POUR: 2.5, STICK: 0.02, SELF: 0.01, ABS: 0.2, SCOOP: 0.25, LUMPY: 1 }, (typeof window !== 'undefined' && window.__cfg) || {});
+const N = 20, CS = 22, OX = 40, OY = 40, R = 9.3, CX = 9.5, CY = 9.5, SPOONS = 30, POURS = CFG.POURS, TICKS = 6;
+let P, M, S, IN, used, good, dry, mushy, tool, over, pours, pending, slumpNote, marks, slumps;
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+const topEl = document.getElementById('top'), subEl = document.getElementById('sub'), logEl = document.getElementById('log');
+
+let seed = (typeof window !== 'undefined' && window.__seed) || (typeof location !== 'undefined' && +((location.search.match(/碗=(\d+)/) || location.search.match(/%E7%A2%97=(\d+)/) || [])[1])) || (Date.now() % 100000);
+function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+function fresh() {
+  P = []; M = []; S = []; IN = [];
+  /* 盛的时候粥面不平：几个鼓包、一两处洼，每碗不一样 */
+  const blobs = [];
+  if (CFG.LUMPY) for (let k = 0; k < 7; k++) blobs.push({ x: 2 + rnd() * 16, y: 2 + rnd() * 16, r: 2 + rnd() * 3, h: k < 5 ? 1 : -1 });
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = y * N + x, d = Math.hypot(x - CX, y - CY);
+    let h = 2;
+    for (const b of blobs) if (Math.hypot(x - b.x, y - b.y) < b.r) h += b.h;
+    IN[i] = d < R; P[i] = IN[i] ? Math.max(1, Math.min(3, h)) : 0; M[i] = 0; S[i] = 0;
+  }
+  used = 0; good = 0; dry = 0; mushy = 0; over = false; pours = POURS; pending = 0; slumpNote = false; marks = []; slumps = []; slides = []; pops = [];
+  setTool('spoon'); logEl.innerHTML = ''; status();
+}
+function status() {
+  if (over) return;
+  topEl.textContent = '早饭。还有 ' + (SPOONS - used) + ' 勺，车就来了。';
+  subEl.textContent = '奶壶里还能倒 ' + pours + ' 回。' + (used ? '　正好的 ' + good + ' 勺，干的 ' + dry + '，糊的 ' + mushy + '。' : '');
+}
+function note(t) { const old = logEl.innerHTML ? logEl.innerHTML.split('<br>') : []; if (old[0] === t) return; logEl.innerHTML = [t].concat(old.slice(0, 3)).join('<br>'); }
+function setTool(t) { tool = t; document.getElementById('spoon').className = t === 'spoon' ? 'on' : ''; document.getElementById('jug').className = t === 'jug' ? 'on' : ''; }
+document.getElementById('spoon').onclick = () => setTool('spoon');
+document.getElementById('jug').onclick = () => setTool('jug');
+document.getElementById('again').onclick = fresh;
+
+const NB = [[1,0],[-1,0],[0,1],[0,-1]];
+function nbrs(i) { const x = i % N, y = (i - x) / N, r = []; for (const [dx, dy] of NB) { const a = x + dx, b = y + dy; if (a >= 0 && b >= 0 && a < N && b < N && IN[b * N + a]) r.push(b * N + a); } return r; }
+
+cv.addEventListener('mousedown', e => {
+  const r = cv.getBoundingClientRect();
+  act(Math.floor((e.clientX - r.left - OX) / CS), Math.floor((e.clientY - r.top - OY) / CS));
+});
+function act(x, y) {
+  if (over || pending > 0 || x < 0 || y < 0 || x >= N || y >= N) return;
+  const i = y * N + x;
+  if (!IN[i]) return;
+  if (tool === 'jug') {
+    if (pours <= 0) { note('奶壶空了。'); return; }
+    pours--; M[i] += CFG.POUR; note('倒了一点奶。');
+  } else {
+    if (P[i] <= 0 && M[i] < 0.05) return;
+    if (P[i] > 0) {
+      P[i] -= 1;
+      let kind = S[i] < 0.2 ? '干' : (S[i] < 0.7 ? '正好' : '糊');
+      if (CFG.SCOOP && kind === '干') {
+        /* 勺子挨着奶：连粥带一口奶舀起来，也正好；舀走那格的奶 */
+        let src = M[i] >= 0.08 ? i : -1;
+        if (src < 0) for (const j of nbrs(i)) if (M[j] >= 0.15 && (src < 0 || M[j] > M[src])) src = j;
+        if (src >= 0) { kind = '正好'; M[src] = Math.max(0, M[src] - CFG.SCOOP); }
+      }
+      if (kind === '干') dry++; else if (kind === '正好') good++; else mushy++;
+      pop(x, y, kind); marks.push({ x, y, kind, n: used + 1 });
+    } else { pop(x, y, '只有奶'); M[i] = 0; return; }
+    M[i] = 0; used++;
+  }
+  slumpNote = false;
+  for (const q of slides) q.left--; slides = slides.filter(q => q.left > 0);
+  pending = TICKS;
+  if (used >= SPOONS) { over = true; pending = 0; topEl.textContent = '车来了。'; subEl.textContent = '正好的 ' + good + ' 勺，干的 ' + dry + ' 勺，糊的 ' + mushy + ' 勺。碗里标着你每一勺舀在哪、是第几勺；×是塌过的地方。'; return; }
+  status();
+}
+window.__zhou = { act, step, setTool, flush: () => { while (pending > 0) { step(); pending--; } }, get: () => ({ P, M, S, IN, used, good, dry, mushy, over, pours }) };
+
+let pops = [], slides = [];
+function pop(x, y, t) { pops.push({ x: OX + x * CS + CS / 2, y: OY + y * CS, t, life: 40 }); }
+
+function step() {
+  /* 奶往低处流；粥面上挂得住薄薄一层（差不到 STICK 不流） */
+  const STICK = CFG.STICK, dM = new Array(N * N).fill(0);
+  for (let i = 0; i < N * N; i++) {
+    if (!IN[i] || M[i] <= 0.001) continue;
+    const h = P[i] + M[i];
+    const lower = nbrs(i).filter(j => P[j] + M[j] < h - STICK);
+    if (!lower.length) continue;
+    let give = 0;
+    for (const j of lower) give += (h - STICK - P[j] - M[j]);
+    const can = Math.min(M[i], give / (lower.length + 1));
+    for (const j of lower) { const f = (h - STICK - P[j] - M[j]) / give * can * 0.5; dM[j] += f; dM[i] -= f; }
+  }
+  for (let i = 0; i < N * N; i++) M[i] = Math.max(0, M[i] + dM[i]);
+  /* 泡着奶的粥变软；挨着奶的慢一点 */
+  for (let i = 0; i < N * N; i++) {
+    if (!IN[i] || P[i] <= 0) continue;
+    let wet = M[i] > 0.03 ? 0.02 : 0;
+    for (const j of nbrs(i)) if (M[j] > 0.1) wet += 0.006;
+    if (S[i] >= 0.2) wet += CFG.SELF; /* 泡开了的自己接着软，不等奶 */
+    if (wet > 0) { S[i] += wet; if (M[i] > 0) M[i] = Math.max(0, M[i] - wet * CFG.ABS); }
+  }
+  /* 软透了就塌一层，滑到旁边最低的那格 */
+  for (let i = 0; i < N * N; i++) {
+    if (!IN[i] || P[i] <= 0 || S[i] < 1) continue;
+    let best = -1, bh = P[i] + M[i] - 0.5;
+    for (const j of nbrs(i)) { const hj = P[j] + M[j]; if (hj < bh) { bh = hj; best = j; } }
+    S[i] = 0.75;
+    if (best < 0) continue;
+    P[i] -= 1; P[best] += 1; S[best] = Math.max(S[best], 0.8); slumps.push(i);
+    { const fx = i % N, fy = (i - fx) / N, tx = best % N, ty = (best - tx) / N; slides.push({ fx, fy, tx, ty, left: 2 }); pop(tx, ty, '塌'); }
+    if (!slumpNote) { note('一块泡透了，塌进旁边那格。'); slumpNote = true; }
+  }
+}
+
+function draw() {
+  g.clearRect(0, 0, cv.width, cv.height);
+  g.fillStyle = '#d8d0c4'; g.beginPath(); g.arc(OX + (CX + 0.5) * CS, OY + (CY + 0.5) * CS, (R + 0.9) * CS, 0, 7); g.fill();
+  g.font = '11px sans-serif'; g.textAlign = 'center'; g.fillStyle = '#8a7a6a';
+  for (let k = 0; k < N; k++) { g.fillText(k, OX + k * CS + CS / 2, OY - 26); g.fillText(k, OX - 28, OY + k * CS + CS / 2 + 4); }
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = y * N + x; if (!IN[i]) continue;
+    const s = Math.min(S[i], 1), p = P[i];
+    let r, gg, b;
+    if (p > 0) {
+      /* 干：淡黄；正好：暖黄；糊：灰褐。高一层亮一点 */
+      const k = 1; /* 高低只靠边线画，颜色只管干、正好、糊 */
+      if (s < 0.2) { r = 240; gg = 222; b = 170; }
+      else if (s < 0.7) { const t = (s - 0.2) / 0.5; r = 238 - 60 * t; gg = 196 - 86 * t; b = 110 - 50 * t; } /* 刚泡开浅橙，快糊了深褐 */
+      else { r = 138; gg = 138; b = 140; }
+      r = Math.min(255, r * k); gg = Math.min(255, gg * k); b = Math.min(255, b * k);
+    } else { r = 246; gg = 248; b = 252; } /* 碗底，白瓷 */
+    g.fillStyle = `rgb(${r|0},${gg|0},${b|0})`; g.fillRect(OX + x * CS, OY + y * CS, CS, CS);
+    if (p > 0 && s >= 0.7) { /* 糊了：灰底上两道斜线，不跟深橙混 */
+      g.strokeStyle = 'rgba(70,70,74,0.7)'; g.lineWidth = 1.5; g.beginPath();
+      g.moveTo(OX + x * CS + 4, OY + (y + 1) * CS - 4); g.lineTo(OX + (x + 1) * CS - 4, OY + y * CS + 4);
+      g.moveTo(OX + x * CS + 4, OY + y * CS + 4); g.lineTo(OX + (x + 1) * CS - 4, OY + (y + 1) * CS - 4); g.stroke(); g.lineWidth = 1; }
+    if (M[i] > 0.03) { g.fillStyle = `rgba(252,253,255,${Math.min(0.95, 0.55 + M[i] * 0.4)})`; g.fillRect(OX + x * CS + 2, OY + y * CS + 2, CS - 4, CS - 4); }
+  }
+  /* 高低：哪两格之间差一层，就在那条边上画一道影子（低的那边） */
+  g.strokeStyle = 'rgba(70,50,30,0.55)'; g.lineWidth = 2;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = y * N + x; if (!IN[i]) continue;
+    if (x + 1 < N && IN[i + 1] && P[i] !== P[i + 1]) { const lx = OX + (x + 1) * CS; g.beginPath(); g.moveTo(lx, OY + y * CS); g.lineTo(lx, OY + (y + 1) * CS); g.stroke();
+      g.fillStyle = 'rgba(80,55,30,0.22)'; if (P[i] > P[i + 1]) g.fillRect(lx, OY + y * CS, 5, CS); else g.fillRect(lx - 5, OY + y * CS, 5, CS); }
+    if (y + 1 < N && IN[i + N] && P[i] !== P[i + N]) { const ly = OY + (y + 1) * CS; g.beginPath(); g.moveTo(OX + x * CS, ly); g.lineTo(OX + (x + 1) * CS, ly); g.stroke();
+      g.fillStyle = 'rgba(80,55,30,0.22)'; if (P[i] > P[i + N]) g.fillRect(OX + x * CS, ly, CS, 5); else g.fillRect(OX + x * CS, ly - 5, CS, 5); }
+  }
+  g.lineWidth = 1;
+  g.strokeStyle = 'rgba(80,60,40,0.12)';
+  for (let k = 0; k <= N; k++) { g.beginPath(); g.moveTo(OX + k * CS, OY); g.lineTo(OX + k * CS, OY + N * CS); g.stroke(); g.beginPath(); g.moveTo(OX, OY + k * CS); g.lineTo(OX + N * CS, OY + k * CS); g.stroke(); }
+  for (const q of slides) {
+    const ax = OX + q.fx * CS + CS / 2, ay = OY + q.fy * CS + CS / 2, bx = OX + q.tx * CS + CS / 2, by = OY + q.ty * CS + CS / 2;
+    g.strokeStyle = `rgba(110,80,50,${0.45 + 0.25 * q.left})`; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+    g.fillStyle = g.strokeStyle; g.beginPath(); g.arc(bx, by, 4, 0, 7); g.fill();
+    g.lineWidth = 1;
+  }
+  if (over) {
+    g.textAlign = 'center'; g.font = '10px sans-serif';
+    for (const i of new Set(slumps)) { const x = i % N, y = (i - x) / N; g.fillStyle = 'rgba(90,70,50,0.8)'; g.fillText('×', OX + x * CS + CS / 2, OY + y * CS + CS / 2 + 4); }
+    for (const m of marks) {
+      const cx = OX + m.x * CS + CS / 2, cy = OY + m.y * CS + CS / 2;
+      g.fillStyle = m.kind === '正好' ? '#c8701e' : (m.kind === '干' ? '#e8e0c8' : '#6e6252');
+      g.beginPath(); g.arc(cx, cy, 8, 0, 7); g.fill();
+      g.fillStyle = m.kind === '干' ? '#5a4a30' : '#fff'; g.fillText(m.n, cx, cy + 3.5);
+    }
+  }
+  g.font = 'bold 12px sans-serif';
+  for (const q of pops) { g.fillStyle = `rgba(60,40,20,${q.life / 40})`; g.fillText(q.t, q.x, q.y - (40 - q.life) / 2); q.life--; }
+  pops = pops.filter(q => q.life > 0);
+}
+
+fresh();
+(function loop() { if (pending > 0) { step(); pending--; } draw(); requestAnimationFrame(loop); })();
+</script>
+</body>
+</html>
