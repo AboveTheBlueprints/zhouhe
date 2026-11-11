@@ -26,7 +26,7 @@ canvas { background:#2b2622; cursor:pointer; }
    干的噎，泡透的糊，奶刚洇到的那一圈正好。 */
 const CFG = Object.assign({ POURS: 3, POUR: 2.5, STICK: 0.02, SELF: 0.01, ABS: 0.2, SCOOP: 0.25, LUMPY: 1 }, (typeof window !== 'undefined' && window.__cfg) || {});
 const N = 20, CS = 22, OX = 40, OY = 40, R = 9.3, CX = 9.5, CY = 9.5, SPOONS = 30, POURS = CFG.POURS, TICKS = 6;
-let P, M, S, IN, used, good, dry, mushy, tool, over, pours, pending, slumpNote, marks, slumps;
+let pourMarks = []; let P, M, S, IN, used, good, dry, mushy, tool, over, pours, pending, slumpNote, marks, slumps;
 const cv = document.getElementById('c'), g = cv.getContext('2d');
 const topEl = document.getElementById('top'), subEl = document.getElementById('sub'), logEl = document.getElementById('log');
 
@@ -43,7 +43,7 @@ function fresh() {
     for (const b of blobs) if (Math.hypot(x - b.x, y - b.y) < b.r) h += b.h;
     IN[i] = d < R; P[i] = IN[i] ? Math.max(1, Math.min(3, h)) : 0; M[i] = 0; S[i] = 0;
   }
-  used = 0; good = 0; dry = 0; mushy = 0; over = false; pours = POURS; pending = 0; slumpNote = false; marks = []; slumps = []; slides = []; pops = [];
+  used = 0; good = 0; dry = 0; mushy = 0; over = false; pours = POURS; pending = 0; slumpNote = false; marks = []; pourMarks = []; slumps = []; slides = []; pops = [];
   setTool('spoon'); logEl.innerHTML = ''; status();
 }
 function status() {
@@ -70,7 +70,7 @@ function act(x, y) {
   if (!IN[i]) return;
   if (tool === 'jug') {
     if (pours <= 0) { note('奶壶空了。'); return; }
-    pours--; M[i] += CFG.POUR; note('倒了一点奶。');
+    pours--; M[i] += CFG.POUR; pourMarks.push({ x, y, n: POURS - pours, at: used }); note('倒了一点奶。');
   } else {
     if (P[i] <= 0 && M[i] < 0.05) return;
     if (P[i] > 0) {
@@ -90,7 +90,7 @@ function act(x, y) {
   slumpNote = false;
   for (const q of slides) q.left--; slides = slides.filter(q => q.left > 0);
   pending = TICKS;
-  if (used >= SPOONS) { over = true; pending = 0; topEl.textContent = '车来了。'; subEl.textContent = '正好的 ' + good + ' 勺，干的 ' + dry + ' 勺，糊的 ' + mushy + ' 勺。碗里标着你每一勺舀在哪、是第几勺；×是塌过的地方。'; return; }
+  if (used >= SPOONS) { over = true; pending = 0; topEl.textContent = '车来了。'; subEl.textContent = '正好的 ' + good + ' 勺，干的 ' + dry + ' 勺，糊的 ' + mushy + ' 勺。碗里标着你每一勺舀在哪、是第几勺，蓝的一滴是你倒奶的地方；×是塌过的地方。'; return; }
   status();
 }
 window.__zhou = { act, step, setTool, flush: () => { while (pending > 0) { step(); pending--; } }, get: () => ({ P, M, S, IN, used, good, dry, mushy, over, pours }) };
@@ -151,10 +151,10 @@ function draw() {
       r = Math.min(255, r * k); gg = Math.min(255, gg * k); b = Math.min(255, b * k);
     } else { r = 246; gg = 248; b = 252; } /* 碗底，白瓷 */
     g.fillStyle = `rgb(${r|0},${gg|0},${b|0})`; g.fillRect(OX + x * CS, OY + y * CS, CS, CS);
-    if (p > 0 && s >= 0.7) { /* 糊了：灰底上两道斜线，不跟深橙混 */
+    if (p > 0 && s >= 0.7) { /* 糊了：灰底上两道平行斜线，不跟深橙混，也不跟塌过的×混 */
       g.strokeStyle = 'rgba(70,70,74,0.7)'; g.lineWidth = 1.5; g.beginPath();
-      g.moveTo(OX + x * CS + 4, OY + (y + 1) * CS - 4); g.lineTo(OX + (x + 1) * CS - 4, OY + y * CS + 4);
-      g.moveTo(OX + x * CS + 4, OY + y * CS + 4); g.lineTo(OX + (x + 1) * CS - 4, OY + (y + 1) * CS - 4); g.stroke(); g.lineWidth = 1; }
+      g.moveTo(OX + x * CS + 3, OY + (y + 1) * CS - 9); g.lineTo(OX + x * CS + 9, OY + y * CS + 3);
+      g.moveTo(OX + x * CS + 9, OY + (y + 1) * CS - 3); g.lineTo(OX + (x + 1) * CS - 3, OY + y * CS + 9); g.stroke(); g.lineWidth = 1; }
     if (M[i] > 0.03) { g.fillStyle = `rgba(252,253,255,${Math.min(0.95, 0.55 + M[i] * 0.4)})`; g.fillRect(OX + x * CS + 2, OY + y * CS + 2, CS - 4, CS - 4); }
   }
   /* 高低：哪两格之间差一层，就在那条边上画一道影子（低的那边） */
@@ -184,6 +184,14 @@ function draw() {
       g.fillStyle = m.kind === '正好' ? '#c8701e' : (m.kind === '干' ? '#e8e0c8' : '#6e6252');
       g.beginPath(); g.arc(cx, cy, 8, 0, 7); g.fill();
       g.fillStyle = m.kind === '干' ? '#5a4a30' : '#fff'; g.fillText(m.n, cx, cy + 3.5);
+    }
+  }
+  if (over) {
+    for (const q of pourMarks) { /* 每回奶倒在哪：一滴，写第几回 */
+      const cx = OX + q.x * CS + 3, cy = OY + q.y * CS + 2;
+      g.fillStyle = 'rgba(70,120,190,0.9)'; g.beginPath(); g.moveTo(cx, cy - 9); g.quadraticCurveTo(cx + 7, cy, cx, cy + 5); g.quadraticCurveTo(cx - 7, cy, cx, cy - 9); g.fill();
+      g.fillStyle = '#fff'; g.font = 'bold 9px sans-serif'; g.fillStyle = 'rgba(40,80,140,1)'; g.fillText('奶' + q.n, cx, cy - 11);
+      g.font = '10px sans-serif';
     }
   }
   g.font = 'bold 12px sans-serif';
